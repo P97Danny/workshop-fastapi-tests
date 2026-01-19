@@ -45,9 +45,11 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "unit: Unit tests (isolated, no external deps)",
+    "integration: Integration tests (real database)",
     "level_1: Level 1 - Simple assertion tests",
     "level_2: Level 2 - Exception testing",
     "level_3: Level 3 - Mocking and patching",
+    "level_4: Level 4 - Integration tests",
 ]
 
 [tool.coverage.run]

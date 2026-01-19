@@ -30,6 +30,7 @@ Unit tests are **isolated, small tests** that verify a single unit of code (func
 | 1 | Simple Assertions | 10 min | `test_level_1_basics.py` |
 | 2 | Exception Testing | 10 min | `test_level_2_exceptions.py` |
 | 3 | Mocking/Patching | 10 min | `test_level_3_mocking.py` |
+| 4 | Integration Tests | 10 min | `test_level_4_integration.py` |
 
 ## Setup
 
@@ -128,6 +129,18 @@ See: [LEVEL_2.md](LEVEL_2.md)
 - Verifying call counts and arguments
 
 See: [LEVEL_3.md](LEVEL_3.md)
+
+### Level 4: Integration Tests (10 min)
+
+**Goal:** Test service logic with a real database.
+
+**Concepts:**
+- Real SQLite database per test
+- Arranging test data
+- Testing pagination and filtering
+- Verifying data integrity
+
+See: [LEVEL_4.md](LEVEL_4.md)
 
 ## Best Practices
 

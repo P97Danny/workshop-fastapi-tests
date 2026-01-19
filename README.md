@@ -51,12 +51,14 @@ project/
     └── pagination.py    # Pagination utilities
 
 tests/
-├── conftest.py          # Fixtures
-└── unit/
-    ├── test_level_1_basics.py      # Simple assertions (5 + 3 exercises)
-    ├── test_level_2_exceptions.py  # Exception testing (5 + 3 exercises)
-    ├── test_level_3_mocking.py     # Mocking/patching (5 + 3 exercises)
-    └── archive/                    # Original extended tests (55 tests)
+├── conftest.py          # Fixtures (mocks for unit, real DB for integration)
+├── unit/
+│   ├── test_level_1_basics.py      # Simple assertions (5 + 3 exercises)
+│   ├── test_level_2_exceptions.py  # Exception testing (5 + 3 exercises)
+│   ├── test_level_3_mocking.py     # Mocking/patching (5 + 3 exercises)
+│   └── archive/                    # Original extended tests (55 tests)
+└── integration/
+    └── test_level_4_integration.py # Integration tests (5 + 3 exercises)
 
 docs/
 ├── WORKSHOP.md          # Main workshop guide
@@ -86,16 +88,24 @@ See [docs/WORKSHOP.md](docs/WORKSHOP.md) for the complete unit testing workshop 
 # run all unit tests (focused - 24 tests)
 pytest tests/unit/ -v --ignore=tests/unit/archive
 
+# run integration tests (8 tests)
+pytest tests/integration/ -v
+
 # run by level marker
 pytest -k level_1 -v    # simple assertions (5 + 3 exercises)
 pytest -k level_2 -v    # exception testing (5 + 3 exercises)
 pytest -k level_3 -v    # mocking/patching (5 + 3 exercises)
+pytest -k level_4 -v    # integration tests (5 + 3 exercises)
+
+# run by test type
+pytest -m unit -v          # all unit tests
+pytest -m integration -v   # all integration tests
 
 # run archived tests (original 55 tests)
 pytest tests/unit/archive/ -v
 
 # run with coverage report
-pytest tests/unit/ --cov=project --cov-report=html --ignore=tests/unit/archive
+pytest tests/ --cov=project --cov-report=html --ignore=tests/unit/archive
 open htmlcov/index.html
 ```
 
