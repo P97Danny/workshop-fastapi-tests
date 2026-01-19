@@ -1,90 +1,114 @@
 """
 Level 3: Mocking and Patching
 ==============================
-Goal: Isolate units under test using unittest.mock.
+Goal: Isolate code under test by replacing dependencies with mocks.
 
-Key concepts:
-- Mock objects to replace dependencies
-- patch() to temporarily replace imports
-- MagicMock for automatic method/attribute creation
-- Verifying call counts and arguments
+Focus: 5 practical mocking patterns for FastAPI service/dependency testing.
 
 Run these tests:
     pytest tests/unit/test_level_3_mocking.py -v
     pytest -k level_3 -v
 """
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
-from project.db.models.task import Task, TaskStatus
+from project.db.models.task import Task
 from project.db.models.user import Role, User
-from project.exceptions import EntityNotFoundError
-from project.security import TokenPayload, create_access_token, verify_password
+from project.exceptions import AuthenticationError, EntityNotFoundError
+from project.security import TokenData, TokenPayload
 from project.utils.pagination import PaginatedData, PaginationParams
-
-
-# =============================================================================
-# EXAMPLE TESTS - Study these patterns
-# =============================================================================
 
 
 @pytest.mark.unit
 @pytest.mark.level_3
-class TestServiceWithMockedSession:
-    """Example: Mock SQLAlchemy Session to test service functions."""
+class TestLevel3:
+    """
+    Level 3: Mocking and Patching
+    
+    These 5 tests cover essential mocking patterns for FastAPI apps:
+    1. Mock DB session to test services without database
+    2. Service raises exception when entity not found
+    3. Patch settings/config to control test environment
+    4. Mock token decode in auth dependency
+    5. Test role-based access control (require_admin)
+    """
 
-    def test_get_user_by_username_with_mock_session(self):
-        """Test user lookup with mocked database session."""
+    # =========================================================================
+    # TEST 1: Mock DB Session for Service Testing
+    # WHY: Test service logic without needing a real database
+    # =========================================================================
+    def test_service_with_mocked_session(self):
+        """Test service function using mocked SQLAlchemy session.
+        
+        Real-world: You want to test your service logic (query building,
+        result processing) without spinning up a test database.
+        """
+        from project.services.user_service import get_user_by_username
+
         # arrange: create mock session and user
         mock_session = Mock()
         mock_user = Mock(spec=User)
         mock_user.username = "testuser"
         mock_user.email = "test@example.com"
 
-        # configure mock to return user
+        # configure mock to return user when queried
         mock_session.execute.return_value.scalar_one_or_none.return_value = mock_user
 
-        # act: call the service function
-        from project.services.user_service import get_user_by_username
-
+        # act: call service with mock session
         result = get_user_by_username(mock_session, "testuser")
 
-        # assert: verify result and that session was called correctly
+        # assert: service returns expected result
         assert result.username == "testuser"
+        assert result.email == "test@example.com"
+        
+        # verify session was actually used
         mock_session.execute.assert_called_once()
 
-    def test_get_user_by_username_raises_when_not_found(self):
-        """Test that service raises EntityNotFoundError when user missing."""
-        # arrange: mock session returns None
+    # =========================================================================
+    # TEST 2: Service Raises Exception When Not Found
+    # WHY: Services must raise domain exceptions, not return None
+    # =========================================================================
+    def test_service_raises_when_entity_not_found(self):
+        """Test that service raises EntityNotFoundError when lookup fails.
+        
+        Real-world: When session.scalar_one_or_none() returns None,
+        your service should raise EntityNotFoundError, not return None.
+        """
+        from project.services.user_service import get_user_by_username
+
+        # arrange: mock session returns None (user not found)
         mock_session = Mock()
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
-        # act & assert
-        from project.services.user_service import get_user_by_username
-
+        # act & assert: service raises EntityNotFoundError
         with pytest.raises(EntityNotFoundError) as exc_info:
             get_user_by_username(mock_session, "nonexistent")
 
         assert exc_info.value.entity_type == "User"
+        assert exc_info.value.identifier == "nonexistent"
 
-
-@pytest.mark.unit
-@pytest.mark.level_3
-class TestTokenCreationWithPatchedSettings:
-    """Example: Patch get_settings to control configuration."""
-
+    # =========================================================================
+    # TEST 3: Patch Settings to Control Test Environment
+    # WHY: Test config-dependent code without modifying .env
+    # =========================================================================
     @patch("project.security.get_settings")
-    def test_create_access_token_uses_settings(self, mock_get_settings):
-        """Test that create_access_token uses settings for JWT encoding."""
+    def test_token_creation_with_patched_settings(self, mock_get_settings):
+        """Test token creation using patched settings.
+        
+        Real-world: Test that your auth code correctly uses settings
+        like SECRET_KEY and ALGORITHM without requiring .env file.
+        """
+        from project.security import create_access_token
+
         # arrange: mock settings
         mock_settings = Mock()
-        mock_settings.SECRET_KEY = "test-secret"
+        mock_settings.SECRET_KEY = "test-secret-key"
         mock_settings.ALGORITHM = "HS256"
-        mock_settings.ACCESS_TOKEN_EXPIRE_MINUTES = 60
+        mock_settings.ACCESS_TOKEN_EXPIRE_MINUTES = 30
         mock_get_settings.return_value = mock_settings
 
         payload = TokenPayload(
@@ -93,237 +117,119 @@ class TestTokenCreationWithPatchedSettings:
             user_uuid=str(uuid4()),
         )
 
-        # act
+        # act: create token
         token = create_access_token(payload)
 
-        # assert
+        # assert: token was created with patched settings
         assert token.access_token is not None
         assert token.token_type == "bearer"
         mock_get_settings.assert_called()
 
-    @patch("project.security.get_settings")
-    @patch("project.security.jwt.encode")
-    def test_create_access_token_payload_structure(self, mock_encode, mock_get_settings):
-        """Test that JWT payload contains expected fields."""
-        # arrange
-        mock_settings = Mock()
-        mock_settings.SECRET_KEY = "test-secret"
-        mock_settings.ALGORITHM = "HS256"
-        mock_settings.ACCESS_TOKEN_EXPIRE_MINUTES = 30
-        mock_get_settings.return_value = mock_settings
-        mock_encode.return_value = "mock-token"
-
-        user_uuid = str(uuid4())
-        payload = TokenPayload(
-            username="john",
-            role="admin",
-            user_uuid=user_uuid,
-        )
-
-        # act
-        create_access_token(payload)
-
-        # assert: verify jwt.encode was called with correct structure
-        mock_encode.assert_called_once()
-        call_args = mock_encode.call_args[0][0]  # first positional arg
-
-        assert call_args["username"] == "john"
-        assert call_args["role"] == "admin"
-        assert call_args["user_uuid"] == user_uuid
-        assert "exp" in call_args
-
-
-@pytest.mark.unit
-@pytest.mark.level_3
-class TestPasswordVerificationWithMock:
-    """Example: Test password verification (uses real bcrypt, no mock needed)."""
-
-    def test_verify_password_correct(self):
-        """Test verify_password returns True for correct password."""
-        from project.security import encrypt_password
-
-        password = "mypassword"
-        hashed = encrypt_password(password)
-
-        assert verify_password(password, hashed) is True
-
-    def test_verify_password_incorrect(self):
-        """Test verify_password returns False for wrong password."""
-        from project.security import encrypt_password
-
-        hashed = encrypt_password("correctpassword")
-
-        assert verify_password("wrongpassword", hashed) is False
-
-
-@pytest.mark.unit
-@pytest.mark.level_3
-class TestTaskServiceWithMockedSession:
-    """Example: Test task service with comprehensive mocking."""
-
-    def test_get_tasks_with_pagination(self):
-        """Test get_tasks applies pagination correctly."""
-        # arrange
-        mock_session = Mock()
-
-        # create mock tasks
-        mock_task1 = Mock(spec=Task)
-        mock_task1.title = "Task 1"
-        mock_task2 = Mock(spec=Task)
-        mock_task2.title = "Task 2"
-
-        # mock the query chain
-        mock_scalars = Mock()
-        mock_scalars.all.return_value = [mock_task1, mock_task2]
-        mock_session.execute.return_value.scalars.return_value = mock_scalars
-
-        pagination = PaginationParams(limit=10, offset=0)
-
-        # act
-        from project.services.task_service import get_tasks
-
-        result = get_tasks(mock_session, pagination)
-
-        # assert
-        assert isinstance(result, PaginatedData)
-        assert len(result.results) == 2
-        assert result.limit == 10
-        assert result.offset == 0
-
-
-# =============================================================================
-# EXERCISES - Complete these tests
-# =============================================================================
-
-
-@pytest.mark.unit
-@pytest.mark.level_3
-class TestAuthServiceWithMocks:
-    """Exercise: Test auth service with mocked dependencies."""
-
-    @patch("project.services.auth_service.get_user_by_username")
-    @patch("project.services.auth_service.verify_password")
-    def test_authenticate_user_success(self, mock_verify, mock_get_user):
-        """TODO: Test authenticate_user returns user on valid credentials."""
-        # arrange:
-        # - mock_get_user should return a mock user
-        # - mock_verify should return True
-        #
-        # act:
-        # - call authenticate_user(session, "testuser", "password")
-        #
-        # assert:
-        # - result should be the mock user
-        # - mock_verify should have been called
-        # YOUR CODE HERE
-        pass
-
-    @patch("project.services.auth_service.get_user_by_username")
-    @patch("project.services.auth_service.verify_password")
-    def test_authenticate_user_wrong_password(self, mock_verify, mock_get_user):
-        """TODO: Test authenticate_user raises on wrong password."""
-        # arrange:
-        # - mock_get_user returns a user
-        # - mock_verify returns False
-        #
-        # assert:
-        # - AuthenticationError is raised
-        # YOUR CODE HERE
-        pass
-
-
-@pytest.mark.unit
-@pytest.mark.level_3
-class TestDependenciesWithMocks:
-    """Exercise: Test FastAPI dependencies with mocked services."""
-
+    # =========================================================================
+    # TEST 4: Mock Token Decode in Auth Dependency
+    # WHY: Test auth dependency without creating real JWT tokens
+    # =========================================================================
     @patch("project.dependencies.decode_token")
     @patch("project.dependencies.get_user_by_username")
-    def test_get_current_user_success(self, mock_get_user, mock_decode):
-        """TODO: Test get_current_user returns user from valid token."""
-        # arrange:
-        # - mock_decode returns TokenData(username="testuser")
-        # - mock_get_user returns a mock user
-        #
-        # act:
-        # - call get_current_user(token="valid-token", session=mock_session)
-        #
-        # assert:
-        # - returns the mock user
-        # YOUR CODE HERE
-        pass
+    def test_get_current_user_dependency(self, mock_get_user, mock_decode):
+        """Test get_current_user dependency with mocked token decode.
+        
+        Real-world: Test that your auth dependency correctly:
+        - Decodes the JWT token
+        - Looks up the user from decoded username
+        - Returns the user object
+        """
+        from project.dependencies import get_current_user
 
-    def test_require_admin_raises_for_non_admin(self, sample_user):
-        """TODO: Test require_admin raises HTTPException for regular user."""
-        # the sample_user fixture has role=USER
-        # call require_admin(sample_user)
-        # verify HTTPException with status 403 is raised
-        #
-        # hint: from fastapi import HTTPException
-        # YOUR CODE HERE
-        pass
+        # arrange: mock token decode and user lookup
+        mock_decode.return_value = TokenData(username="testuser")
+        mock_user = Mock(spec=User)
+        mock_user.username = "testuser"
+        mock_get_user.return_value = mock_user
+        mock_session = Mock()
 
-    def test_require_admin_allows_admin(self, admin_user):
-        """TODO: Test require_admin returns user for admin."""
-        # the admin_user fixture has role=ADMIN
-        # call require_admin(admin_user)
-        # verify it returns the user without raising
-        # YOUR CODE HERE
-        pass
+        # act: call dependency
+        result = get_current_user(token="fake-token", session=mock_session)
+
+        # assert: returns user from decoded token
+        assert result.username == "testuser"
+        mock_decode.assert_called_once_with("fake-token")
+        mock_get_user.assert_called_once_with(mock_session, "testuser")
+
+    # =========================================================================
+    # TEST 5: Test Role-Based Access Control
+    # WHY: Ensure admin-only endpoints reject non-admin users
+    # =========================================================================
+    def test_require_admin_access_control(self, sample_user, admin_user):
+        """Test require_admin dependency enforces admin role.
+        
+        Real-world: Admin-only endpoints must reject regular users
+        with HTTP 403, but allow admin users through.
+        """
+        from project.dependencies import require_admin
+
+        # non-admin user should be rejected
+        with pytest.raises(HTTPException) as exc_info:
+            require_admin(sample_user)
+        
+        assert exc_info.value.status_code == 403
+        assert "Admin" in exc_info.value.detail
+
+        # admin user should pass through
+        result = require_admin(admin_user)
+        assert result.role == Role.ADMIN.value
 
 
-@pytest.mark.unit
-@pytest.mark.level_3
-class TestTokenExpirationWithPatchedDatetime:
-    """Exercise: Test token expiration by patching datetime."""
-
-    @patch("project.security.get_settings")
-    @patch("project.security.datetime")
-    def test_token_expiration_time(self, mock_datetime, mock_get_settings):
-        """TODO: Test that token expiration is set correctly."""
-        # arrange:
-        # - set mock_datetime.now() to return a fixed time
-        # - set mock_datetime.now(timezone.utc) to return same fixed time
-        # - configure ACCESS_TOKEN_EXPIRE_MINUTES = 60
-        #
-        # act:
-        # - create token
-        #
-        # assert:
-        # - exp in the JWT payload should be now + 60 minutes
-        #
-        # hint: you may need to patch jwt.encode to capture the payload
-        # YOUR CODE HERE
-        pass
+# =============================================================================
+# EXERCISES - Practice mocking patterns
+# =============================================================================
 
 
 @pytest.mark.unit
 @pytest.mark.level_3
-class TestTaskServiceCreateWithMocks:
-    """Exercise: Test task creation with mocked session."""
+class TestLevel3Exercises:
+    """
+    Exercises: Apply what you learned above.
+    
+    Complete these tests following the same patterns.
+    """
 
-    def test_create_task_adds_to_session(self, sample_user):
-        """TODO: Test create_task calls session.add() and commit()."""
-        # arrange:
-        # - create mock session with MagicMock()
-        # - create TaskCreate with valid data
-        #
-        # act:
-        # - call create_task(session, task_data, sample_user)
-        #
-        # assert:
-        # - session.add was called once
-        # - session.commit was called once
-        # - session.refresh was called once
+    def test_task_service_with_mocked_session(self):
+        """Exercise: Test get_task_by_uuid with mocked session.
+        
+        - Create mock session
+        - Configure it to return a mock task
+        - Call get_task_by_uuid(session, some_uuid)
+        - Verify it returns the mock task
+        """
+        # from project.services.task_service import get_task_by_uuid
         # YOUR CODE HERE
         pass
 
-    def test_create_task_raises_on_invalid_priority(self, sample_user):
-        """TODO: Test create_task raises ValidationError for bad priority."""
-        # note: this tests the SERVICE validation, not Pydantic
-        # the service has its own priority check
-        # you may need to bypass Pydantic validation to test this
-        #
-        # hint: create a Mock TaskCreate object instead of real TaskCreate
+    def test_task_service_raises_not_found(self):
+        """Exercise: Test get_task_by_uuid raises EntityNotFoundError.
+        
+        - Create mock session returning None
+        - Call get_task_by_uuid
+        - Verify EntityNotFoundError is raised with entity_type="Task"
+        """
+        # YOUR CODE HERE
+        pass
+
+    @patch("project.services.auth_service.get_user_by_username")
+    @patch("project.services.auth_service.verify_password")
+    def test_authenticate_user_with_mocks(self, mock_verify, mock_get_user):
+        """Exercise: Test authenticate_user with mocked dependencies.
+        
+        - mock_get_user returns a mock user
+        - mock_verify returns True (password matches)
+        - Call authenticate_user(session, "user", "pass")
+        - Verify it returns the mock user
+        
+        Then test the failure case:
+        - mock_verify returns False
+        - Verify AuthenticationError is raised
+        """
+        # from project.services.auth_service import authenticate_user
         # YOUR CODE HERE
         pass

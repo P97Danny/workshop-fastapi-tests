@@ -1,12 +1,9 @@
 """
 Level 2: Exception Testing
 ===========================
-Goal: Test that functions raise expected exceptions and side effects.
+Goal: Test that code raises expected exceptions for invalid input.
 
-Key concepts:
-- pytest.raises() context manager
-- Checking exception messages and attributes
-- Testing validation boundaries
+Focus: 5 practical tests for validating error handling in FastAPI apps.
 
 Run these tests:
     pytest tests/unit/test_level_2_exceptions.py -v
@@ -18,208 +15,189 @@ from pydantic import ValidationError as PydanticValidationError
 
 from project.config import Settings
 from project.db.models.task import TaskCreate
-from project.exceptions import AuthenticationError, AuthorizationError, EntityNotFoundError, ValidationError
+from project.exceptions import AuthenticationError, EntityNotFoundError
 from project.utils.pagination import PaginationParams
 
 
-# =============================================================================
-# EXAMPLE TESTS - Study these patterns
-# =============================================================================
-
-
 @pytest.mark.unit
 @pytest.mark.level_2
-class TestPaginationParamsValidation:
-    """Example: Test Pydantic validation raises on invalid input."""
+class TestLevel2:
+    """
+    Level 2: Exception Testing
+    
+    These 5 tests cover essential exception testing patterns:
+    1. Pydantic validation rejects invalid input
+    2. Boundary validation (min/max values)
+    3. Config/Settings validation
+    4. Domain exception raising and catching
+    5. Custom exception attributes
+    """
 
-    def test_pagination_rejects_negative_offset(self):
-        """PaginationParams should reject negative offset."""
-        with pytest.raises(PydanticValidationError) as exc_info:
-            PaginationParams(offset=-1)
-
-        # check error details
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        assert errors[0]["loc"] == ("offset",)
-
-    def test_pagination_rejects_zero_limit(self):
-        """PaginationParams should reject zero limit."""
-        with pytest.raises(PydanticValidationError) as exc_info:
-            PaginationParams(limit=0)
-
-        errors = exc_info.value.errors()
-        assert any(e["loc"] == ("limit",) for e in errors)
-
-    def test_pagination_rejects_excessive_limit(self):
-        """PaginationParams should reject limit > 100."""
-        with pytest.raises(PydanticValidationError):
-            PaginationParams(limit=101)
-
-
-@pytest.mark.unit
-@pytest.mark.level_2
-class TestTaskCreateValidation:
-    """Example: Test TaskCreate schema validation boundaries."""
-
+    # =========================================================================
+    # TEST 1: Pydantic Rejects Invalid Input
+    # WHY: Your API should return 422 for invalid payloads, not crash
+    # =========================================================================
     def test_task_create_rejects_empty_title(self):
-        """TaskCreate should reject empty title."""
+        """Test that TaskCreate raises ValidationError for empty title.
+        
+        Real-world: Clients might send {"title": ""} which should fail
+        validation, not create a task with empty title.
+        """
         with pytest.raises(PydanticValidationError) as exc_info:
             TaskCreate(title="")
 
+        # verify it's the title field that failed
         errors = exc_info.value.errors()
         assert any(e["loc"] == ("title",) for e in errors)
 
-    def test_task_create_rejects_priority_below_1(self):
-        """TaskCreate should reject priority < 1."""
+    # =========================================================================
+    # TEST 2: Boundary Validation
+    # WHY: Test edge cases - what values are just inside/outside valid range
+    # =========================================================================
+    def test_pagination_boundary_validation(self):
+        """Test pagination params enforce min/max boundaries.
+        
+        Real-world: Clients might request limit=0, limit=9999, or offset=-1.
+        Your API needs to reject these before hitting the database.
+        """
+        # limit must be > 0
         with pytest.raises(PydanticValidationError):
-            TaskCreate(title="Test", priority=0)
-
-    def test_task_create_rejects_priority_above_5(self):
-        """TaskCreate should reject priority > 5."""
+            PaginationParams(limit=0)
+        
+        # limit must be <= 100
         with pytest.raises(PydanticValidationError):
-            TaskCreate(title="Test", priority=6)
+            PaginationParams(limit=101)
+        
+        # offset must be >= 0
+        with pytest.raises(PydanticValidationError) as exc_info:
+            PaginationParams(offset=-1)
+        
+        errors = exc_info.value.errors()
+        assert errors[0]["loc"] == ("offset",)
+        
+        # boundary values should work
+        valid_min = PaginationParams(limit=1, offset=0)
+        valid_max = PaginationParams(limit=100, offset=1000)
+        assert valid_min.limit == 1
+        assert valid_max.limit == 100
 
-    def test_task_create_accepts_boundary_priorities(self):
-        """TaskCreate should accept priority 1 and 5."""
-        # these should NOT raise
-        task_low = TaskCreate(title="Low Priority", priority=1)
-        task_high = TaskCreate(title="High Priority", priority=5)
+    # =========================================================================
+    # TEST 3: Config/Settings Validation
+    # WHY: App should fail fast on bad config, not at runtime
+    # =========================================================================
+    def test_settings_rejects_invalid_config(self):
+        """Test Settings validation catches config errors at startup.
+        
+        Real-world: If DB_URL is empty or token expiry is negative,
+        the app should fail immediately, not when first user logs in.
+        """
+        # empty DB_URL should fail
+        with pytest.raises(ValueError):
+            Settings(
+                SECRET_KEY="test",
+                DB_URL="",
+                DB_TYPE="sqlite",
+            )
+        
+        # negative token expiry should fail
+        with pytest.raises(ValueError):
+            Settings(
+                SECRET_KEY="test",
+                DB_URL="sqlite:///test.db",
+                DB_TYPE="sqlite",
+                ACCESS_TOKEN_EXPIRE_MINUTES=-1,
+            )
 
-        assert task_low.priority == 1
-        assert task_high.priority == 5
+    # =========================================================================
+    # TEST 4: Domain Exception Raising and Catching
+    # WHY: Services raise domain exceptions, routers catch and convert to HTTP
+    # =========================================================================
+    def test_service_function_raises_domain_exception(self):
+        """Test that domain exceptions can be raised and caught correctly.
+        
+        Real-world: Your services raise EntityNotFoundError, your routers
+        catch it and return HTTP 404. This pattern must work.
+        """
+        def lookup_task(task_id: str):
+            # simulate service that doesn't find the entity
+            raise EntityNotFoundError("Task", task_id)
 
-
-@pytest.mark.unit
-@pytest.mark.level_2
-class TestEntityNotFoundError:
-    """Example: Test custom exception behavior."""
-
-    def test_entity_not_found_is_service_error(self):
-        """EntityNotFoundError should be a ServiceError subclass."""
-        error = EntityNotFoundError("User", "123")
-
-        # isinstance checks inheritance
-        from project.exceptions import ServiceError
-
-        assert isinstance(error, ServiceError)
-
-    def test_entity_not_found_stores_entity_type(self):
-        """EntityNotFoundError should store entity_type attribute."""
-        error = EntityNotFoundError("Task", "abc-123")
-
-        assert error.entity_type == "Task"
-        assert error.identifier == "abc-123"
-
-    def test_entity_not_found_can_be_raised_and_caught(self):
-        """EntityNotFoundError should be raiseable and catchable."""
-
-        def lookup_user(user_id: str):
-            raise EntityNotFoundError("User", user_id)
-
+        # exception is raiseable
         with pytest.raises(EntityNotFoundError) as exc_info:
-            lookup_user("nonexistent")
+            lookup_task("nonexistent-uuid")
 
-        assert exc_info.value.entity_type == "User"
+        # exception has expected attributes for error handling
+        assert exc_info.value.entity_type == "Task"
+        assert exc_info.value.identifier == "nonexistent-uuid"
+        
+        # exception is catchable by parent class
+        try:
+            lookup_task("another-uuid")
+        except Exception as e:
+            from project.exceptions import ServiceError
+            assert isinstance(e, ServiceError)
+
+    # =========================================================================
+    # TEST 5: Auth Exception Defaults
+    # WHY: Auth errors should have secure default messages (don't leak info)
+    # =========================================================================
+    def test_auth_exception_has_secure_default(self):
+        """Test AuthenticationError has secure default message.
+        
+        Real-world: Auth errors shouldn't reveal whether username exists
+        or password was wrong - just "authentication failed".
+        """
+        # default message is generic
+        error = AuthenticationError()
+        assert error.message == "Authentication failed"
+        
+        # custom message can be set when needed
+        custom = AuthenticationError("Session expired")
+        assert custom.message == "Session expired"
 
 
 # =============================================================================
-# EXERCISES - Complete these tests
+# EXERCISES - Practice exception testing patterns
 # =============================================================================
 
 
 @pytest.mark.unit
 @pytest.mark.level_2
-class TestSettingsValidation:
-    """Exercise: Test Settings validation raises on invalid config."""
+class TestLevel2Exercises:
+    """
+    Exercises: Apply what you learned above.
+    
+    Complete these tests following the same patterns.
+    """
 
-    def test_settings_rejects_empty_db_url(self):
-        """TODO: Test Settings raises when DB_URL is empty."""
-        # use pytest.raises to verify ValueError is raised
-        # when creating Settings(DB_URL="")
+    def test_task_priority_boundaries(self):
+        """Exercise: Test TaskCreate priority must be 1-5.
+        
+        - priority=0 should raise PydanticValidationError
+        - priority=6 should raise PydanticValidationError
+        - priority=1 and priority=5 should work (boundary values)
+        """
         # YOUR CODE HERE
         pass
 
-    def test_settings_rejects_invalid_db_url_format(self):
-        """TODO: Test Settings raises on non-sqlite:// URL when DB_TYPE is sqlite."""
-        # when DB_TYPE="sqlite", the DB_URL should start with "sqlite://"
-        # test that an invalid format raises an error
+    def test_task_title_max_length(self):
+        """Exercise: Test TaskCreate title max length is 200 chars.
+        
+        - title with 201 chars should raise PydanticValidationError
+        - title with exactly 200 chars should work
+        
+        Hint: "x" * 201 creates a string of 201 x's
+        """
         # YOUR CODE HERE
         pass
 
-    def test_settings_rejects_negative_token_expiry(self):
-        """TODO: Test Settings raises when ACCESS_TOKEN_EXPIRE_MINUTES <= 0."""
-        # YOUR CODE HERE
-        pass
-
-
-@pytest.mark.unit
-@pytest.mark.level_2
-class TestAuthenticationError:
-    """Exercise: Test AuthenticationError exception."""
-
-    def test_authentication_error_has_default_message(self):
-        """TODO: Test AuthenticationError has sensible default message."""
-        # create AuthenticationError without arguments
-        # verify it has a default message
-        # YOUR CODE HERE
-        pass
-
-    def test_authentication_error_accepts_custom_message(self):
-        """TODO: Test AuthenticationError stores custom message."""
-        # YOUR CODE HERE
-        pass
-
-
-@pytest.mark.unit
-@pytest.mark.level_2
-class TestAuthorizationError:
-    """Exercise: Test AuthorizationError exception."""
-
-    def test_authorization_error_stores_required_role(self):
-        """TODO: Test AuthorizationError stores required_role attribute."""
-        # create AuthorizationError with required_role="admin"
-        # verify error.required_role == "admin"
-        # verify error.context contains required_role
-        # YOUR CODE HERE
-        pass
-
-
-@pytest.mark.unit
-@pytest.mark.level_2
-class TestValidationErrorField:
-    """Exercise: Test ValidationError with field context."""
-
-    def test_validation_error_includes_field_in_context(self):
-        """TODO: Test ValidationError field is in context dict."""
-        # create ValidationError("Invalid email", field="email")
-        # verify error.context["field"] == "email"
-        # YOUR CODE HERE
-        pass
-
-    def test_validation_error_without_field(self):
-        """TODO: Test ValidationError works without field argument."""
-        # create ValidationError with just message
-        # verify error.field is None
-        # verify error.context does not contain "field" key
-        # YOUR CODE HERE
-        pass
-
-
-@pytest.mark.unit
-@pytest.mark.level_2
-class TestTaskCreateTitleValidation:
-    """Exercise: Test TaskCreate title length limits."""
-
-    def test_task_create_rejects_title_over_200_chars(self):
-        """TODO: Test TaskCreate rejects title longer than 200 characters."""
-        # create a title with 201 characters
-        # verify PydanticValidationError is raised
-        # YOUR CODE HERE
-        pass
-
-    def test_task_create_accepts_title_at_max_length(self):
-        """TODO: Test TaskCreate accepts exactly 200 character title."""
-        # create a title with exactly 200 characters
-        # verify it works without raising
+    def test_exception_context_contains_details(self):
+        """Exercise: Test that exception context dict has useful info.
+        
+        Create an EntityNotFoundError("User", "test@example.com") and verify:
+        - error.context is a dict
+        - error.context["entity_type"] == "User"
+        - error.context["identifier"] == "test@example.com"
+        """
         # YOUR CODE HERE
         pass

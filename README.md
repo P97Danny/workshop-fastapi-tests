@@ -53,9 +53,10 @@ project/
 tests/
 ├── conftest.py          # Fixtures
 └── unit/
-    ├── test_level_1_basics.py      # Simple assertions
-    ├── test_level_2_exceptions.py  # Exception testing
-    └── test_level_3_mocking.py     # Mocking/patching
+    ├── test_level_1_basics.py      # Simple assertions (5 + 3 exercises)
+    ├── test_level_2_exceptions.py  # Exception testing (5 + 3 exercises)
+    ├── test_level_3_mocking.py     # Mocking/patching (5 + 3 exercises)
+    └── archive/                    # Original extended tests (55 tests)
 
 docs/
 ├── WORKSHOP.md          # Main workshop guide
@@ -82,16 +83,19 @@ See [docs/WORKSHOP.md](docs/WORKSHOP.md) for the complete unit testing workshop 
 ### Running Test Levels
 
 ```bash
-# run all unit tests
-pytest tests/unit/ -v
+# run all unit tests (focused - 24 tests)
+pytest tests/unit/ -v --ignore=tests/unit/archive
 
 # run by level marker
-pytest -k level_1 -v    # simple assertions
-pytest -k level_2 -v    # exception testing
-pytest -k level_3 -v    # mocking/patching
+pytest -k level_1 -v    # simple assertions (5 + 3 exercises)
+pytest -k level_2 -v    # exception testing (5 + 3 exercises)
+pytest -k level_3 -v    # mocking/patching (5 + 3 exercises)
+
+# run archived tests (original 55 tests)
+pytest tests/unit/archive/ -v
 
 # run with coverage report
-pytest tests/unit/ --cov=project --cov-report=html
+pytest tests/unit/ --cov=project --cov-report=html --ignore=tests/unit/archive
 open htmlcov/index.html
 ```
 
