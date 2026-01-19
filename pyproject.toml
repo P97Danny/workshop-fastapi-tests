@@ -1,0 +1,62 @@
+[project]
+name = "fastapi-test-repo"
+version = "0.1.0"
+description = "Demo FastAPI app for pytest unit testing workshop"
+authors = [
+    {name = "awiseguy", email = "arvin@wise-it.info"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.118.0",
+    "sqlalchemy>=2.0.36",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "python-jose[cryptography]>=3.3.0",
+    "bcrypt>=4.2.0",
+    "uvicorn>=0.32.0",
+]
+
+[tool.poetry]
+packages = [{include = "project"}]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-cov = "^6.0.0"
+ruff = "^0.8.0"
+pre-commit = "^4.0.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "unit: Unit tests (isolated, no external deps)",
+    "level_1: Level 1 - Simple assertion tests",
+    "level_2: Level 2 - Exception testing",
+    "level_3: Level 3 - Mocking and patching",
+]
+
+[tool.coverage.run]
+source = ["project"]
+omit = ["tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
